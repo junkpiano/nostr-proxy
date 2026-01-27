@@ -22,7 +22,7 @@ RUN apt-get update \
 
 ENV BIND_ADDR=0.0.0.0:3000
 
-COPY --from=builder /app/target/release/nostr_proxy /usr/local/bin/nostr-proxy
+COPY --from=builder /app/target/release/nostr-proxy /usr/local/bin/nostr-proxy
 
 EXPOSE 3000
 
