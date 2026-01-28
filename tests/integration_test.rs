@@ -7,7 +7,10 @@ async fn test_health_endpoint() {
 
     let client = reqwest::Client::new();
     let response = client
-        .get(format!("{}/api/ogp?url=https://example.com/", TEST_SERVER_URL))
+        .get(format!(
+            "{}/api/ogp?url=https://example.com/",
+            TEST_SERVER_URL
+        ))
         .send()
         .await;
 
@@ -35,7 +38,11 @@ async fn test_ssrf_protection() {
     if let Ok(resp) = response {
         let status = resp.status().as_u16();
         // Accept either 400 (SSRF blocked) or 429 (rate limited)
-        assert!(status == 400 || status == 429, "Expected 400 or 429, got {}", status);
+        assert!(
+            status == 400 || status == 429,
+            "Expected 400 or 429, got {}",
+            status
+        );
         if status == 400 {
             let body = resp.text().await.unwrap();
             assert!(body.contains("blocked: private IP"));
@@ -51,7 +58,10 @@ async fn test_rate_limiting() {
     let mut responses = Vec::new();
     for _ in 0..11 {
         let response = client
-            .get(format!("{}/api/ogp?url=https://example.com/", TEST_SERVER_URL))
+            .get(format!(
+                "{}/api/ogp?url=https://example.com/",
+                TEST_SERVER_URL
+            ))
             .send()
             .await;
 
@@ -63,7 +73,11 @@ async fn test_rate_limiting() {
     // At least one should be rate limited (429)
     if !responses.is_empty() {
         let rate_limited_count = responses.iter().filter(|&&s| s == 429).count();
-        println!("Rate limited responses: {}/{}", rate_limited_count, responses.len());
+        println!(
+            "Rate limited responses: {}/{}",
+            rate_limited_count,
+            responses.len()
+        );
     }
 }
 
@@ -78,7 +92,11 @@ async fn test_invalid_url() {
 
     if let Ok(resp) = response {
         let status = resp.status().as_u16();
-        assert!(status == 400 || status == 429, "Expected 400 or 429, got {}", status);
+        assert!(
+            status == 400 || status == 429,
+            "Expected 400 or 429, got {}",
+            status
+        );
         if status == 400 {
             let body = resp.text().await.unwrap();
             assert!(body.contains("invalid url"));
@@ -92,14 +110,21 @@ async fn test_unsupported_content_type() {
 
     // Try to fetch an image (should return 415)
     let response = client
-        .get(format!("{}/api/ogp?url=https://httpbin.org/image/png", TEST_SERVER_URL))
+        .get(format!(
+            "{}/api/ogp?url=https://httpbin.org/image/png",
+            TEST_SERVER_URL
+        ))
         .send()
         .await;
 
     if let Ok(resp) = response {
         let status = resp.status().as_u16();
         // Accept 415 (unsupported content type) or 429 (rate limited)
-        assert!(status == 415 || status == 429, "Expected 415 or 429, got {}", status);
+        assert!(
+            status == 415 || status == 429,
+            "Expected 415 or 429, got {}",
+            status
+        );
         if status == 415 {
             let body = resp.text().await.unwrap();
             assert!(body.contains("unsupported content type"));
@@ -112,7 +137,10 @@ async fn test_successful_ogp_fetch() {
     let client = reqwest::Client::new();
 
     let response = client
-        .get(format!("{}/api/ogp?url=https://example.com/", TEST_SERVER_URL))
+        .get(format!(
+            "{}/api/ogp?url=https://example.com/",
+            TEST_SERVER_URL
+        ))
         .send()
         .await;
 
