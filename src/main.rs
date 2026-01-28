@@ -5,11 +5,13 @@ use axum::{
     routing::get,
     Router,
 };
+use bytes::Bytes;
+use futures::StreamExt;
 use hickory_resolver::{
     config::{ResolverConfig, ResolverOpts},
     TokioAsyncResolver,
 };
-use reqwest::{header::LOCATION, Client};
+use reqwest::{header::{CONTENT_LENGTH, LOCATION}, Client};
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -120,6 +122,15 @@ async fn ogp_handler(
                     warn!("redirect loop detected");
                     (StatusCode::BAD_REQUEST, "redirect loop detected")
                 }
+                OgpError::PayloadTooLarge { size, limit } => {
+                    warn!(
+                        payload_too_large = true,
+                        size = size,
+                        limit = limit,
+                        "Response size exceeds limit"
+                    );
+                    (StatusCode::PAYLOAD_TOO_LARGE, "payload too large")
+                }
                 OgpError::Request(_) => {
                     error!("request error: {:?}", err);
                     (StatusCode::BAD_GATEWAY, "fetch failed")
@@ -141,6 +152,7 @@ enum OgpError {
     DnsResolution(String),
     TooManyRedirects,
     RedirectLoop,
+    PayloadTooLarge { size: usize, limit: usize },
     Request(reqwest::Error),
     Parse,
 }
@@ -162,6 +174,8 @@ async fn fetch_with_redirect_protection(
     initial_url: Url,
 ) -> Result<String, OgpError> {
     const MAX_REDIRECTS: usize = 3;
+    const MAX_RESPONSE_SIZE: usize = 1_048_576; // 1MB
+
     let mut current_url = initial_url;
     let mut visited_urls = HashSet::new();
 
@@ -205,9 +219,9 @@ async fn fetch_with_redirect_protection(
             continue;
         }
 
-        // Not a redirect, check status and return body
+        // Not a redirect, check status and return body with size limit
         let response = response.error_for_status().map_err(OgpError::Request)?;
-        return response.text().await.map_err(OgpError::Request);
+        return read_response_with_limit(response, MAX_RESPONSE_SIZE).await;
     }
 
     // Should not reach here
@@ -358,4 +372,50 @@ async fn resolve_and_validate_url(
     }
 
     Ok(())
+}
+
+/// Read response body with size limit (protection against memory exhaustion)
+async fn read_response_with_limit(
+    response: reqwest::Response,
+    max_size: usize,
+) -> Result<String, OgpError> {
+    // Check Content-Length header first
+    if let Some(content_length) = response.headers().get(CONTENT_LENGTH) {
+        if let Ok(length_str) = content_length.to_str() {
+            if let Ok(length) = length_str.parse::<usize>() {
+                info!("Content-Length: {} bytes (limit: {} bytes)", length, max_size);
+                if length > max_size {
+                    warn!("Content-Length {} exceeds limit {}, rejecting before download", length, max_size);
+                    return Err(OgpError::PayloadTooLarge {
+                        size: length,
+                        limit: max_size,
+                    });
+                }
+            }
+        }
+    }
+
+    // Read body in chunks with size limit
+    let mut stream = response.bytes_stream();
+    let mut accumulated = Vec::new();
+    let mut total_size = 0;
+
+    while let Some(chunk_result) = stream.next().await {
+        let chunk = chunk_result.map_err(OgpError::Request)?;
+        total_size += chunk.len();
+
+        if total_size > max_size {
+            warn!("Response size {} exceeds limit {} during streaming, aborting", total_size, max_size);
+            return Err(OgpError::PayloadTooLarge {
+                size: total_size,
+                limit: max_size,
+            });
+        }
+
+        accumulated.extend_from_slice(&chunk);
+    }
+
+    info!("Successfully read {} bytes", total_size);
+    // Convert bytes to String
+    String::from_utf8(accumulated).map_err(|_| OgpError::Parse)
 }
