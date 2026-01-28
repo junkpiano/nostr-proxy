@@ -63,8 +63,8 @@ async fn main() {
 
     // Create DNS resolver for SSRF protection
     // Using tokio_from_system_conf() to properly initialize from system DNS settings
-    let resolver = TokioAsyncResolver::tokio_from_system_conf()
-        .expect("failed to create DNS resolver");
+    let resolver =
+        TokioAsyncResolver::tokio_from_system_conf().expect("failed to create DNS resolver");
 
     let state = AppState {
         client,
@@ -161,7 +161,10 @@ async fn ogp_handler(
                         content_type = %content_type,
                         "Content-Type not supported"
                     );
-                    (StatusCode::UNSUPPORTED_MEDIA_TYPE, "unsupported content type")
+                    (
+                        StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                        "unsupported content type",
+                    )
                 }
                 OgpError::Request(_) => {
                     error!("request error: {:?}", err);
@@ -178,6 +181,7 @@ async fn ogp_handler(
 }
 
 #[derive(Debug)]
+#[allow(dead_code)] // Fields are used via Debug trait for logging
 enum OgpError {
     InvalidUrl(String),
     SsrfBlocked { reason: String, ip: IpAddr },
@@ -241,7 +245,9 @@ async fn fetch_with_redirect_protection(
                 .headers()
                 .get(LOCATION)
                 .and_then(|v| v.to_str().ok())
-                .ok_or_else(|| OgpError::InvalidUrl("missing Location header in redirect".to_string()))?;
+                .ok_or_else(|| {
+                    OgpError::InvalidUrl("missing Location header in redirect".to_string())
+                })?;
 
             // Parse redirect URL (may be relative)
             current_url = current_url
@@ -343,7 +349,8 @@ fn parse_ogp(html: &str) -> Result<BTreeMap<String, String>, OgpError> {
                 continue;
             }
             if key.starts_with("og:") || key.starts_with("twitter:") {
-                data.entry(key.to_string()).or_insert_with(|| content.to_string());
+                data.entry(key.to_string())
+                    .or_insert_with(|| content.to_string());
             }
         } else if let Some(name) = value.attr("name") {
             let key = name.trim();
@@ -358,7 +365,8 @@ fn parse_ogp(html: &str) -> Result<BTreeMap<String, String>, OgpError> {
                 continue;
             }
             if key == "description" || key == "title" {
-                data.entry(key.to_string()).or_insert_with(|| content.to_string());
+                data.entry(key.to_string())
+                    .or_insert_with(|| content.to_string());
             }
         }
     }
@@ -479,7 +487,12 @@ async fn read_response_with_limit(
     if let Some(content_type) = response.headers().get(CONTENT_TYPE) {
         if let Ok(content_type_str) = content_type.to_str() {
             // Extract MIME type (before semicolon for charset)
-            let mime_type = content_type_str.split(';').next().unwrap_or("").trim().to_lowercase();
+            let mime_type = content_type_str
+                .split(';')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_lowercase();
 
             // Only accept text/html and application/xhtml+xml
             if mime_type != "text/html" && mime_type != "application/xhtml+xml" {
@@ -499,9 +512,15 @@ async fn read_response_with_limit(
     if let Some(content_length) = response.headers().get(CONTENT_LENGTH) {
         if let Ok(length_str) = content_length.to_str() {
             if let Ok(length) = length_str.parse::<usize>() {
-                info!("Content-Length: {} bytes (limit: {} bytes)", length, max_size);
+                info!(
+                    "Content-Length: {} bytes (limit: {} bytes)",
+                    length, max_size
+                );
                 if length > max_size {
-                    warn!("Content-Length {} exceeds limit {}, rejecting before download", length, max_size);
+                    warn!(
+                        "Content-Length {} exceeds limit {}, rejecting before download",
+                        length, max_size
+                    );
                     return Err(OgpError::PayloadTooLarge {
                         size: length,
                         limit: max_size,
@@ -521,7 +540,10 @@ async fn read_response_with_limit(
         total_size += chunk.len();
 
         if total_size > max_size {
-            warn!("Response size {} exceeds limit {} during streaming, aborting", total_size, max_size);
+            warn!(
+                "Response size {} exceeds limit {} during streaming, aborting",
+                total_size, max_size
+            );
             return Err(OgpError::PayloadTooLarge {
                 size: total_size,
                 limit: max_size,
