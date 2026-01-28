@@ -1,8 +1,8 @@
 name: Tests
 
 on:
-  push:
-    branches: [ "main", "test-implementation" ]
+  # push:
+  #   branches: [ "main", "test-implementation" ]
   pull_request:
     branches: [ "main" ]
 
