@@ -8,7 +8,7 @@ use axum::{
 use futures::StreamExt;
 use hickory_resolver::TokioAsyncResolver;
 use reqwest::{
-    header::{CONTENT_LENGTH, LOCATION},
+    header::{CONTENT_LENGTH, CONTENT_TYPE, LOCATION},
     Client,
 };
 use scraper::{Html, Selector};
@@ -155,6 +155,14 @@ async fn ogp_handler(
                     );
                     (StatusCode::PAYLOAD_TOO_LARGE, "payload too large")
                 }
+                OgpError::UnsupportedContentType { content_type } => {
+                    warn!(
+                        unsupported_content_type = true,
+                        content_type = %content_type,
+                        "Content-Type not supported"
+                    );
+                    (StatusCode::UNSUPPORTED_MEDIA_TYPE, "unsupported content type")
+                }
                 OgpError::Request(_) => {
                     error!("request error: {:?}", err);
                     (StatusCode::BAD_GATEWAY, "fetch failed")
@@ -177,6 +185,7 @@ enum OgpError {
     TooManyRedirects,
     RedirectLoop,
     PayloadTooLarge { size: usize, limit: usize },
+    UnsupportedContentType { content_type: String },
     Request(reqwest::Error),
     Parse,
 }
@@ -261,6 +270,10 @@ fn validate_url(input: &str) -> Result<Url, OgpError> {
 }
 
 fn parse_ogp(html: &str) -> Result<BTreeMap<String, String>, OgpError> {
+    const MAX_META_TAGS: usize = 64;
+    const MAX_CONTENT_LENGTH: usize = 2048;
+    const MAX_KEY_LENGTH: usize = 128;
+
     let doc = Html::parse_document(html);
     let meta_selector = Selector::parse("meta").map_err(|_| OgpError::Parse)?;
     let title_selector = Selector::parse("title").map_err(|_| OgpError::Parse)?;
@@ -268,6 +281,16 @@ fn parse_ogp(html: &str) -> Result<BTreeMap<String, String>, OgpError> {
     let mut data = BTreeMap::new();
 
     for element in doc.select(&meta_selector) {
+        // Stop if we've collected enough meta tags (DoS protection)
+        if data.len() >= MAX_META_TAGS {
+            warn!(
+                meta_tags_limit_reached = true,
+                limit = MAX_META_TAGS,
+                "Meta tags limit reached, stopping parsing"
+            );
+            break;
+        }
+
         let value = element.value();
         let content = value.attr("content");
         if content.is_none() {
@@ -278,13 +301,46 @@ fn parse_ogp(html: &str) -> Result<BTreeMap<String, String>, OgpError> {
             continue;
         }
 
+        // Limit content length (DoS protection)
+        let content = if content.len() > MAX_CONTENT_LENGTH {
+            warn!(
+                content_truncated = true,
+                original_length = content.len(),
+                limit = MAX_CONTENT_LENGTH,
+                "Content value truncated"
+            );
+            &content[..MAX_CONTENT_LENGTH]
+        } else {
+            content
+        };
+
         if let Some(prop) = value.attr("property") {
             let key = prop.trim();
+            // Skip if key is too long (DoS protection)
+            if key.len() > MAX_KEY_LENGTH {
+                warn!(
+                    key_too_long = true,
+                    key_length = key.len(),
+                    limit = MAX_KEY_LENGTH,
+                    "Skipping meta tag with too long key"
+                );
+                continue;
+            }
             if key.starts_with("og:") || key.starts_with("twitter:") {
                 data.entry(key.to_string()).or_insert_with(|| content.to_string());
             }
         } else if let Some(name) = value.attr("name") {
             let key = name.trim();
+            // Skip if key is too long (DoS protection)
+            if key.len() > MAX_KEY_LENGTH {
+                warn!(
+                    key_too_long = true,
+                    key_length = key.len(),
+                    limit = MAX_KEY_LENGTH,
+                    "Skipping meta tag with too long key"
+                );
+                continue;
+            }
             if key == "description" || key == "title" {
                 data.entry(key.to_string()).or_insert_with(|| content.to_string());
             }
@@ -403,6 +459,26 @@ async fn read_response_with_limit(
     response: reqwest::Response,
     max_size: usize,
 ) -> Result<String, OgpError> {
+    // Validate Content-Type (only accept HTML)
+    if let Some(content_type) = response.headers().get(CONTENT_TYPE) {
+        if let Ok(content_type_str) = content_type.to_str() {
+            // Extract MIME type (before semicolon for charset)
+            let mime_type = content_type_str.split(';').next().unwrap_or("").trim().to_lowercase();
+
+            // Only accept text/html and application/xhtml+xml
+            if mime_type != "text/html" && mime_type != "application/xhtml+xml" {
+                warn!(
+                    unsupported_content_type = true,
+                    content_type = %content_type_str,
+                    "Rejecting non-HTML content type"
+                );
+                return Err(OgpError::UnsupportedContentType {
+                    content_type: content_type_str.to_string(),
+                });
+            }
+        }
+    }
+
     // Check Content-Length header first
     if let Some(content_length) = response.headers().get(CONTENT_LENGTH) {
         if let Ok(length_str) = content_length.to_str() {
