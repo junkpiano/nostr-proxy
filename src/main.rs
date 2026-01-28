@@ -85,13 +85,17 @@ async fn main() {
         config: governor_conf,
     };
 
+    // CORS configuration: Allow all GET requests from any origin
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods([axum::http::Method::GET])
+        .allow_headers(Any)
+        .expose_headers(Any)
+        .max_age(Duration::from_secs(3600));
+
     let app = Router::new()
         .route("/api/ogp", get(ogp_handler))
-        .layer(
-            ServiceBuilder::new()
-                .layer(governor_layer)
-                .layer(CorsLayer::new().allow_origin(Any).allow_methods(Any)),
-        )
+        .layer(ServiceBuilder::new().layer(governor_layer).layer(cors))
         .with_state(state);
 
     let bind_addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:3000".to_string());
