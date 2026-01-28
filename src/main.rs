@@ -5,13 +5,12 @@ use axum::{
     routing::get,
     Router,
 };
-use bytes::Bytes;
 use futures::StreamExt;
-use hickory_resolver::{
-    config::{ResolverConfig, ResolverOpts},
-    TokioAsyncResolver,
+use hickory_resolver::TokioAsyncResolver;
+use reqwest::{
+    header::{CONTENT_LENGTH, LOCATION},
+    Client,
 };
-use reqwest::{header::{CONTENT_LENGTH, LOCATION}, Client};
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -20,6 +19,8 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+use tower::ServiceBuilder;
+use tower_governor::{governor::GovernorConfigBuilder, GovernorLayer};
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info, warn};
 use url::Url;
@@ -70,9 +71,27 @@ async fn main() {
         resolver: Arc::new(resolver),
     };
 
+    // Rate limiting: 30 requests per minute per IP, with burst of 10
+    // 30 req/min = 1 req per 2 seconds, with burst of 10
+    let governor_conf = Arc::new(
+        GovernorConfigBuilder::default()
+            .per_second(1)
+            .burst_size(10)
+            .finish()
+            .unwrap(),
+    );
+
+    let governor_layer = GovernorLayer {
+        config: governor_conf,
+    };
+
     let app = Router::new()
         .route("/api/ogp", get(ogp_handler))
-        .layer(CorsLayer::new().allow_origin(Any).allow_methods(Any))
+        .layer(
+            ServiceBuilder::new()
+                .layer(governor_layer)
+                .layer(CorsLayer::new().allow_origin(Any).allow_methods(Any)),
+        )
         .with_state(state);
 
     let bind_addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:3000".to_string());
@@ -80,7 +99,12 @@ async fn main() {
 
     info!("listening on {}", addr);
     let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");
-    axum::serve(listener, app).await.expect("server");
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .expect("server");
 }
 
 async fn ogp_handler(
