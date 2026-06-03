@@ -199,6 +199,47 @@ RUST_LOG=info ./target/release/nostr-proxy
 BIND_ADDR=127.0.0.1:8080 ./target/release/nostr-proxy
 ```
 
+### Cloudflare Worker Preview
+
+The native Axum proxy remains the default target. A separate Worker package lives in
+`worker/` and reuses the shared OGP parsing and validation code from this crate.
+
+Install Wrangler and `worker-build` if they are not already available:
+
+```bash
+cargo install worker-build
+npm install -g wrangler
+```
+
+Run the Worker locally:
+
+```bash
+cd worker
+wrangler dev
+```
+
+The Worker exposes the same endpoint:
+
+```bash
+curl "http://localhost:8787/api/ogp?url=https://example.com/"
+```
+
+Run native and Worker checks separately:
+
+```bash
+# Native proxy and shared library
+cargo test
+
+# Worker package compile check
+cd worker
+worker-build --release
+```
+
+The Worker target cannot use the native DNS pre-resolution path used by the Axum
+server. It blocks private/reserved IP literals, localhost-style hostnames,
+userinfo URLs, unusual ports, and revalidates redirect targets before each
+Worker fetch.
+
 ### Docker
 
 ```bash

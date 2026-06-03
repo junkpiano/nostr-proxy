@@ -1,19 +1,4 @@
-// Unit tests for UTF-8 safe truncation
-
-/// Safely truncate a string to a maximum byte length at a valid UTF-8 character boundary
-fn truncate_utf8_safe(s: &str, max_bytes: usize) -> &str {
-    if s.len() <= max_bytes {
-        return s;
-    }
-
-    // Find the last character boundary at or before max_bytes
-    let mut boundary = max_bytes;
-    while boundary > 0 && !s.is_char_boundary(boundary) {
-        boundary -= 1;
-    }
-
-    &s[..boundary]
-}
+use nostr_proxy::truncate_utf8_safe;
 
 #[test]
 fn test_truncate_utf8_safe_ascii() {
