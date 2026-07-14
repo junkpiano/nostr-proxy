@@ -1,19 +1,4 @@
-// Unit tests for UTF-8 safe truncation
-
-/// Safely truncate a string to a maximum byte length at a valid UTF-8 character boundary
-fn truncate_utf8_safe(s: &str, max_bytes: usize) -> &str {
-    if s.len() <= max_bytes {
-        return s;
-    }
-
-    // Find the last character boundary at or before max_bytes
-    let mut boundary = max_bytes;
-    while boundary > 0 && !s.is_char_boundary(boundary) {
-        boundary -= 1;
-    }
-
-    &s[..boundary]
-}
+use nostr_proxy::truncate_utf8_safe;
 
 #[test]
 fn test_truncate_utf8_safe_ascii() {
@@ -79,4 +64,33 @@ fn test_truncate_utf8_safe_empty() {
 fn test_truncate_utf8_safe_zero_limit() {
     let text = "Hello";
     assert_eq!(truncate_utf8_safe(text, 0), "");
+}
+
+#[test]
+fn test_is_allowed_origin_production() {
+    assert!(nostr_proxy::is_allowed_origin("https://nox.garden"));
+    assert!(!nostr_proxy::is_allowed_origin("http://nox.garden"));
+    assert!(!nostr_proxy::is_allowed_origin("https://www.nox.garden"));
+    assert!(!nostr_proxy::is_allowed_origin(
+        "https://nox.garden.evil.com"
+    ));
+    assert!(!nostr_proxy::is_allowed_origin("https://evilnox.garden"));
+}
+
+#[test]
+fn test_is_allowed_origin_localhost() {
+    assert!(nostr_proxy::is_allowed_origin("http://localhost:3000"));
+    assert!(nostr_proxy::is_allowed_origin("http://localhost:8787"));
+    assert!(nostr_proxy::is_allowed_origin("https://localhost"));
+    assert!(nostr_proxy::is_allowed_origin("http://127.0.0.1:5173"));
+    assert!(nostr_proxy::is_allowed_origin("http://[::1]:3000"));
+    assert!(!nostr_proxy::is_allowed_origin("http://localhost.evil.com"));
+}
+
+#[test]
+fn test_is_allowed_origin_garbage() {
+    assert!(!nostr_proxy::is_allowed_origin(""));
+    assert!(!nostr_proxy::is_allowed_origin("null"));
+    assert!(!nostr_proxy::is_allowed_origin("https://example.com"));
+    assert!(!nostr_proxy::is_allowed_origin("file:///etc/passwd"));
 }

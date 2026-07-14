@@ -1,0 +1,6 @@
+name = "nostr-proxy-worker"
+main = "build/worker/shim.mjs"
+compatibility_date = "2026-06-03"
+
+[build]
+command = "XDG_CACHE_HOME=/tmp/worker-build-cache worker-build --release"

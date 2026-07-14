@@ -3,19 +3,40 @@ name = "nostr-proxy"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "nostr-proxy"
+path = "src/main.rs"
+required-features = ["native"]
+
+[features]
+default = ["native"]
+native = [
+    "dep:axum",
+    "dep:futures",
+    "dep:hickory-resolver",
+    "dep:reqwest",
+    "dep:tokio",
+    "dep:tower",
+    "dep:tower_governor",
+    "dep:tower-http",
+    "dep:tracing-subscriber",
+]
+
 [dependencies]
-axum = "0.7"
-bytes = "1"
-futures = "0.3"
-hickory-resolver = "0.24"
-reqwest = { version = "0.12", features = ["json", "gzip", "brotli", "deflate", "rustls-tls", "stream"] }
+axum = { version = "0.7", optional = true }
+futures = { version = "0.3", optional = true }
+hickory-resolver = { version = "0.26", optional = true }
+reqwest = { version = "0.12", features = ["json", "gzip", "brotli", "deflate", "rustls-tls", "stream"], optional = true }
 scraper = "0.19"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-tower = "0.5"
-tower_governor = "0.4"
-tower-http = { version = "0.5", features = ["cors"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"], optional = true }
+tower = { version = "0.5", optional = true }
+tower_governor = { version = "0.4", optional = true }
+tower-http = { version = "0.5", features = ["cors"], optional = true }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
 url = "2"
