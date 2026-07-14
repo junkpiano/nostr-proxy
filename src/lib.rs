@@ -292,10 +292,7 @@ pub mod native {
         Err(OgpError::TooManyRedirects)
     }
 
-    async fn resolve_and_validate_url(
-        resolver: &TokioResolver,
-        url: &Url,
-    ) -> Result<(), OgpError> {
+    async fn resolve_and_validate_url(resolver: &TokioResolver, url: &Url) -> Result<(), OgpError> {
         let host = url
             .host_str()
             .ok_or_else(|| OgpError::InvalidUrl("no host".to_string()))?;
