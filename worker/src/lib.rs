@@ -1,27 +1,25 @@
 use nostr_proxy::{
-    parse_ogp, validate_url, validate_worker_target_url, OgpError, OgpResponse, MAX_REDIRECTS,
-    MAX_RESPONSE_SIZE,
+    is_allowed_origin, parse_ogp, validate_url, validate_worker_target_url, OgpError, OgpResponse,
+    MAX_REDIRECTS, MAX_RESPONSE_SIZE,
 };
 use std::collections::{BTreeMap, HashSet};
-use worker::{
-    event, Fetch, Headers, Method, Request, RequestInit, RequestRedirect, Response, Result,
-};
+use worker::{event, Fetch, Method, Request, RequestInit, RequestRedirect, Response, Result};
 
 #[event(fetch)]
 pub async fn fetch(req: Request, _env: worker::Env, _ctx: worker::Context) -> Result<Response> {
     console_error_panic_hook::set_once();
 
     if req.method() == Method::Options {
-        return with_cors(Response::empty()?);
+        return with_cors(&req, Response::empty()?);
     }
 
     if req.method() != Method::Get {
-        return with_cors(Response::error("method not allowed", 405)?);
+        return with_cors(&req, Response::error("method not allowed", 405)?);
     }
 
     let request_url = req.url()?;
     if request_url.path() != "/api/ogp" {
-        return with_cors(Response::error("not found", 404)?);
+        return with_cors(&req, Response::error("not found", 404)?);
     }
 
     let Some(target) = request_url
@@ -29,15 +27,15 @@ pub async fn fetch(req: Request, _env: worker::Env, _ctx: worker::Context) -> Re
         .find(|(key, _)| key == "url")
         .map(|(_, value)| value.to_string())
     else {
-        return with_cors(Response::error("invalid url", 400)?);
+        return with_cors(&req, Response::error("invalid url", 400)?);
     };
 
     match fetch_ogp_worker(&target).await {
         Ok(data) => {
             let response = OgpResponse { url: target, data };
-            with_cors(Response::from_json(&response)?)
+            with_cors(&req, Response::from_json(&response)?)
         }
-        Err(err) => with_cors(error_response(err)?),
+        Err(err) => with_cors(&req, error_response(err)?),
     }
 }
 
@@ -164,10 +162,15 @@ fn error_response(err: OgpError) -> Result<Response> {
     }
 }
 
-fn with_cors(response: Response) -> Result<Response> {
-    let headers = Headers::new();
-    headers.set("Access-Control-Allow-Origin", "*")?;
-    headers.set("Access-Control-Allow-Methods", "GET, OPTIONS")?;
-    headers.set("Access-Control-Allow-Headers", "*")?;
-    Ok(response.with_headers(headers))
+fn with_cors(req: &Request, mut response: Response) -> Result<Response> {
+    let headers = response.headers_mut();
+    headers.set("Vary", "Origin")?;
+    if let Some(origin) = req.headers().get("Origin")? {
+        if is_allowed_origin(&origin) {
+            headers.set("Access-Control-Allow-Origin", &origin)?;
+            headers.set("Access-Control-Allow-Methods", "GET, OPTIONS")?;
+            headers.set("Access-Control-Allow-Headers", "*")?;
+        }
+    }
+    Ok(response)
 }

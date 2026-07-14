@@ -65,3 +65,32 @@ fn test_truncate_utf8_safe_zero_limit() {
     let text = "Hello";
     assert_eq!(truncate_utf8_safe(text, 0), "");
 }
+
+#[test]
+fn test_is_allowed_origin_production() {
+    assert!(nostr_proxy::is_allowed_origin("https://nox.garden"));
+    assert!(!nostr_proxy::is_allowed_origin("http://nox.garden"));
+    assert!(!nostr_proxy::is_allowed_origin("https://www.nox.garden"));
+    assert!(!nostr_proxy::is_allowed_origin(
+        "https://nox.garden.evil.com"
+    ));
+    assert!(!nostr_proxy::is_allowed_origin("https://evilnox.garden"));
+}
+
+#[test]
+fn test_is_allowed_origin_localhost() {
+    assert!(nostr_proxy::is_allowed_origin("http://localhost:3000"));
+    assert!(nostr_proxy::is_allowed_origin("http://localhost:8787"));
+    assert!(nostr_proxy::is_allowed_origin("https://localhost"));
+    assert!(nostr_proxy::is_allowed_origin("http://127.0.0.1:5173"));
+    assert!(nostr_proxy::is_allowed_origin("http://[::1]:3000"));
+    assert!(!nostr_proxy::is_allowed_origin("http://localhost.evil.com"));
+}
+
+#[test]
+fn test_is_allowed_origin_garbage() {
+    assert!(!nostr_proxy::is_allowed_origin(""));
+    assert!(!nostr_proxy::is_allowed_origin("null"));
+    assert!(!nostr_proxy::is_allowed_origin("https://example.com"));
+    assert!(!nostr_proxy::is_allowed_origin("file:///etc/passwd"));
+}

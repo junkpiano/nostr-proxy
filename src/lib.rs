@@ -78,6 +78,19 @@ pub fn validate_worker_target_url(url: &Url) -> Result<(), OgpError> {
     Ok(())
 }
 
+pub fn is_allowed_origin(origin: &str) -> bool {
+    let Ok(url) = Url::parse(origin) else {
+        return false;
+    };
+    match url.host_str() {
+        Some("nox.garden") => url.scheme() == "https",
+        Some("localhost") | Some("127.0.0.1") | Some("[::1]") => {
+            url.scheme() == "http" || url.scheme() == "https"
+        }
+        _ => false,
+    }
+}
+
 pub fn truncate_utf8_safe(s: &str, max_bytes: usize) -> &str {
     if s.len() <= max_bytes {
         return s;

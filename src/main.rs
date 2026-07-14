@@ -11,7 +11,7 @@ use reqwest::Client;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tower::ServiceBuilder;
 use tower_governor::{governor::GovernorConfigBuilder, GovernorLayer};
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tracing::{error, info, warn};
 
 #[derive(Clone)]
@@ -59,7 +59,12 @@ async fn main() {
     };
 
     let cors = CorsLayer::new()
-        .allow_origin(Any)
+        .allow_origin(AllowOrigin::predicate(|origin, _| {
+            origin
+                .to_str()
+                .map(nostr_proxy::is_allowed_origin)
+                .unwrap_or(false)
+        }))
         .allow_methods([axum::http::Method::GET])
         .allow_headers(Any)
         .expose_headers(Any)
