@@ -220,7 +220,7 @@ pub mod native {
         MAX_RESPONSE_SIZE,
     };
     use futures::StreamExt;
-    use hickory_resolver::TokioAsyncResolver;
+    use hickory_resolver::TokioResolver;
     use reqwest::{
         header::{CONTENT_LENGTH, CONTENT_TYPE, LOCATION},
         Client,
@@ -231,7 +231,7 @@ pub mod native {
 
     pub async fn fetch_ogp(
         client: &Client,
-        resolver: &TokioAsyncResolver,
+        resolver: &TokioResolver,
         target: &str,
     ) -> Result<BTreeMap<String, String>, OgpError> {
         let url = validate_url(target)?;
@@ -241,7 +241,7 @@ pub mod native {
 
     async fn fetch_with_redirect_protection(
         client: &Client,
-        resolver: &TokioAsyncResolver,
+        resolver: &TokioResolver,
         initial_url: Url,
     ) -> Result<String, OgpError> {
         let mut current_url = initial_url;
@@ -293,7 +293,7 @@ pub mod native {
     }
 
     async fn resolve_and_validate_url(
-        resolver: &TokioAsyncResolver,
+        resolver: &TokioResolver,
         url: &Url,
     ) -> Result<(), OgpError> {
         let host = url

@@ -5,7 +5,7 @@ use axum::{
     routing::get,
     Router,
 };
-use hickory_resolver::TokioAsyncResolver;
+use hickory_resolver::TokioResolver;
 use nostr_proxy::{native::fetch_ogp, OgpError, OgpQuery, OgpResponse};
 use reqwest::Client;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
@@ -17,7 +17,7 @@ use tracing::{error, info, warn};
 #[derive(Clone)]
 struct AppState {
     client: Client,
-    resolver: Arc<TokioAsyncResolver>,
+    resolver: Arc<TokioResolver>,
 }
 
 #[tokio::main]
@@ -38,8 +38,10 @@ async fn main() {
         .build()
         .expect("reqwest client");
 
-    let resolver =
-        TokioAsyncResolver::tokio_from_system_conf().expect("failed to create DNS resolver");
+    let resolver = TokioResolver::builder_tokio()
+        .expect("failed to read system DNS config")
+        .build()
+        .expect("failed to create DNS resolver");
 
     let state = AppState {
         client,
