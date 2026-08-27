@@ -26,13 +26,12 @@ async fn main() {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    let user_agent = std::env::var("USER_AGENT").unwrap_or_else(|_| {
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36".to_string()
-    });
+    let user_agent =
+        std::env::var("USER_AGENT").unwrap_or_else(|_| nostr_proxy::DEFAULT_USER_AGENT.to_string());
 
     let client = Client::builder()
-        .timeout(Duration::from_secs(10))
-        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(15))
+        .connect_timeout(Duration::from_secs(8))
         .user_agent(user_agent)
         .redirect(reqwest::redirect::Policy::none())
         .build()

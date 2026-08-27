@@ -5,11 +5,12 @@ A secure, production-ready HTTP proxy API for fetching Open Graph Protocol (OGP)
 ## Features
 
 - **SSRF Protection**: DNS resolution with private IP blocking (RFC1918, loopback, link-local, cloud metadata endpoints)
-- **Response Size Limits**: 1MB maximum response size with streaming validation
+- **Response Size Limits**: 3MB maximum response size with streaming validation
 - **Rate Limiting**: 60 requests/minute per IP with burst capacity of 10
 - **Content-Type Validation**: Only accepts HTML content, rejects images/videos/PDFs
-- **JSON Bloat Protection**: Limits meta tags (64), content length (2KB), key length (128 chars)
-- **Redirect Control**: Manual redirect following with loop detection (max 3 hops)
+- **JSON Bloat Protection**: Limits meta tags (128), content length (4KB), key length (128 chars)
+- **Redirect Control**: Manual redirect following with loop detection (max 5 hops)
+- **Edge Caching** (Worker only): successful lookups cached 6 hours, failures 5 minutes
 - **Structured Logging**: JSON-formatted logs with security event tracking
 
 ## API Specification
@@ -92,7 +93,7 @@ dns resolution failed
 ```
 too many redirects
 ```
-- More than 3 redirects encountered
+- More than 5 redirects encountered
 
 **Redirect Loop:**
 ```
@@ -105,7 +106,7 @@ redirect loop detected
 ```
 payload too large
 ```
-- Response size exceeds 1MB limit
+- Response size exceeds 3MB limit
 - Detected via Content-Length header or streaming size check
 
 #### 415 Unsupported Media Type
@@ -166,13 +167,30 @@ The API validates all target URLs before making requests:
 
 | Limit | Value | Purpose |
 |-------|-------|---------|
-| Max response size | 1 MB | Prevent memory exhaustion |
-| Max redirects | 3 | Prevent redirect chains |
-| Max meta tags | 64 | Prevent JSON bloat |
-| Max content length | 2048 chars | Prevent large values |
+| Max response size | 3 MB | Prevent memory exhaustion |
+| Max redirects | 5 | Prevent redirect chains |
+| Max meta tags | 128 | Prevent JSON bloat |
+| Max content length | 4096 chars | Prevent large values |
 | Max key length | 128 chars | Prevent long keys |
-| Connection timeout | 5 seconds | Prevent hanging connections |
-| Request timeout | 10 seconds | Prevent slow requests |
+| Connection timeout | 8 seconds | Prevent hanging connections |
+| Request timeout | 15 seconds | Prevent slow requests |
+
+## Caching
+
+The Worker target caches through the Cloudflare Cache API, keyed on the incoming
+request URL. Responses also carry a `Cache-Control` header so browsers reuse them
+without a round trip.
+
+| Outcome | `Cache-Control` | Rationale |
+|---------|-----------------|-----------|
+| Success (200) | `public, max-age=21600` | OGP metadata rarely changes |
+| Failure (4xx/5xx) | `public, max-age=300` | A recovering target is picked up quickly |
+
+Entries are stored *before* CORS headers are applied and the headers are re-added
+per request. The cache does not honour `Vary`, so a stored
+`Access-Control-Allow-Origin` would otherwise be replayed to every other caller.
+
+Cache faults are non-fatal and degrade to a miss. The native target does not cache.
 
 ## Running the Server
 
@@ -181,7 +199,7 @@ The API validates all target URLs before making requests:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `BIND_ADDR` | `0.0.0.0:3000` | Server bind address (host:port) |
-| `USER_AGENT` | Chrome 122 | User-Agent header for outgoing requests |
+| `USER_AGENT` | Chrome 122 | User-Agent header for outgoing requests (native only; the Worker always sends the built-in default) |
 | `RUST_LOG` | - | Log level (e.g., `info`, `debug`, `warn`) |
 
 ### Build and Run
@@ -325,8 +343,8 @@ Security events are logged with structured fields:
 {
   "level": "WARN",
   "payload_too_large": true,
-  "size": 2097152,
-  "limit": 1048576,
+  "size": 4194304,
+  "limit": 3145728,
   "message": "Response size exceeds limit"
 }
 ```
