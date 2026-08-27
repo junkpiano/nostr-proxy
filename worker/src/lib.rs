@@ -1,9 +1,18 @@
 use nostr_proxy::{
     is_allowed_origin, parse_ogp, validate_url, validate_worker_target_url, OgpError, OgpResponse,
-    MAX_REDIRECTS, MAX_RESPONSE_SIZE,
+    DEFAULT_USER_AGENT, MAX_REDIRECTS, MAX_RESPONSE_SIZE,
 };
 use std::collections::{BTreeMap, HashSet};
-use worker::{event, Fetch, Method, Request, RequestInit, RequestRedirect, Response, Result};
+use worker::{
+    event, Cache, Fetch, Headers, Method, Request, RequestInit, RequestRedirect, Response, Result,
+};
+
+/// Successful lookups are cached for six hours; OGP metadata rarely changes.
+const CACHE_CONTROL_SUCCESS: &str = "public, max-age=21600";
+
+/// Failures are cached for five minutes only, so a recovering target is picked
+/// up quickly.
+const CACHE_CONTROL_FAILURE: &str = "public, max-age=300";
 
 #[event(fetch)]
 pub async fn fetch(req: Request, _env: worker::Env, _ctx: worker::Context) -> Result<Response> {
@@ -30,13 +39,46 @@ pub async fn fetch(req: Request, _env: worker::Env, _ctx: worker::Context) -> Re
         return with_cors(&req, Response::error("invalid url", 400)?);
     };
 
-    match fetch_ogp_worker(&target).await {
-        Ok(data) => {
-            let response = OgpResponse { url: target, data };
-            with_cors(&req, Response::from_json(&response)?)
+    // The incoming URL already encodes the target, sits on this Worker's own
+    // hostname, and is stable across callers, so it doubles as the cache key.
+    let cache = Cache::default();
+    let cache_key = request_url.to_string();
+
+    // A cache fault must not become a Worker exception: Cloudflare would then
+    // answer with an error page that carries no CORS headers at all. Degrade to
+    // a miss instead.
+    if let Some(hit) = cache.get(cache_key.as_str(), false).await.ok().flatten() {
+        if let Ok(replayed) = replay_cached(hit).await {
+            return with_cors(&req, replayed);
         }
-        Err(err) => with_cors(&req, error_response(err)?),
     }
+
+    let mut response = match fetch_ogp_worker(&target).await {
+        Ok(data) => {
+            let payload = OgpResponse { url: target, data };
+            let mut ok = Response::from_json(&payload)?;
+            ok.headers_mut()
+                .set("Cache-Control", CACHE_CONTROL_SUCCESS)?;
+            ok
+        }
+        Err(err) => {
+            // Negative results are cached briefly too, so a target that answers
+            // 403 or oversized HTML is not re-fetched on every card render.
+            let mut failed = error_response(err)?;
+            failed
+                .headers_mut()
+                .set("Cache-Control", CACHE_CONTROL_FAILURE)?;
+            failed
+        }
+    };
+
+    // Stored before the CORS headers go on: this cache ignores Vary, so an entry
+    // carrying one caller's Allow-Origin would be replayed to every other caller.
+    if let Ok(copy) = response.cloned() {
+        let _ = cache.put(cache_key.as_str(), copy).await;
+    }
+
+    with_cors(&req, response)
 }
 
 async fn fetch_ogp_worker(target: &str) -> std::result::Result<BTreeMap<String, String>, OgpError> {
@@ -58,8 +100,19 @@ async fn fetch_with_redirect_protection(
 
         validate_worker_target_url(&current_url)?;
 
+        // Without a User-Agent many origins answer 403, which surfaced here as a
+        // generic 502. Match the header set the native target already sends.
+        let headers = Headers::new();
+        headers
+            .set("User-Agent", DEFAULT_USER_AGENT)
+            .map_err(|e| OgpError::Request(e.to_string()))?;
+        headers
+            .set("Accept", "text/html,application/xhtml+xml")
+            .map_err(|e| OgpError::Request(e.to_string()))?;
+
         let mut init = RequestInit::new();
         init.with_method(Method::Get)
+            .with_headers(headers)
             .with_redirect(RequestRedirect::Manual);
         let request = Request::new_with_init(current_url.as_str(), &init)
             .map_err(|e| OgpError::Request(e.to_string()))?;
@@ -160,6 +213,28 @@ fn error_response(err: OgpError) -> Result<Response> {
         OgpError::Request(_) => Response::error("fetch failed", 502),
         OgpError::Parse => Response::error("parse failed", 502),
     }
+}
+
+/// Rebuilds a cache hit into a fresh response.
+///
+/// Responses handed back by the Cache API carry immutable headers, so the CORS
+/// headers cannot be attached to one directly — attempting it throws and the
+/// request dies as a Worker exception with no CORS headers at all.
+async fn replay_cached(mut hit: Response) -> Result<Response> {
+    let status = hit.status_code();
+    let content_type = hit.headers().get("content-type")?;
+    let cache_control = hit.headers().get("cache-control")?;
+    let body = hit.bytes().await?;
+
+    let mut fresh = Response::from_bytes(body)?.with_status(status);
+    let headers = fresh.headers_mut();
+    if let Some(value) = content_type {
+        headers.set("Content-Type", &value)?;
+    }
+    if let Some(value) = cache_control {
+        headers.set("Cache-Control", &value)?;
+    }
+    Ok(fresh)
 }
 
 fn with_cors(req: &Request, mut response: Response) -> Result<Response> {

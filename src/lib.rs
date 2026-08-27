@@ -6,8 +6,15 @@ use std::{
 };
 use url::Url;
 
-pub const MAX_REDIRECTS: usize = 3;
-pub const MAX_RESPONSE_SIZE: usize = 1_048_576;
+pub const MAX_REDIRECTS: usize = 5;
+pub const MAX_RESPONSE_SIZE: usize = 3_145_728;
+
+/// Sent on every outgoing fetch. Many sites answer 403 to a request that
+/// carries no User-Agent, so both targets must set one.
+pub const DEFAULT_USER_AGENT: &str = concat!(
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ",
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+);
 
 #[derive(Debug, Deserialize)]
 pub struct OgpQuery {
@@ -105,8 +112,8 @@ pub fn truncate_utf8_safe(s: &str, max_bytes: usize) -> &str {
 }
 
 pub fn parse_ogp(html: &str) -> Result<BTreeMap<String, String>, OgpError> {
-    const MAX_META_TAGS: usize = 64;
-    const MAX_CONTENT_LENGTH: usize = 2048;
+    const MAX_META_TAGS: usize = 128;
+    const MAX_CONTENT_LENGTH: usize = 4096;
     const MAX_KEY_LENGTH: usize = 128;
 
     let doc = Html::parse_document(html);
