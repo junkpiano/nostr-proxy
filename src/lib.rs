@@ -85,12 +85,31 @@ pub fn validate_worker_target_url(url: &Url) -> Result<(), OgpError> {
     Ok(())
 }
 
+/// The Netlify site the nox web build gets its deploy previews from.
+const NETLIFY_PREVIEW_SITE: &str = "nox-preview.netlify.app";
+
+/// True for the preview site and any of its deploy previews.
+///
+/// Netlify addresses a preview as `<alias>--<site>.netlify.app`, where the
+/// alias is a pull request number or a branch name. It reads the `--` as the
+/// separator before it looks anything up, so the whole `--<site>` namespace
+/// belongs to that site: a name carrying `--` could never be routed anywhere
+/// else, which is why matching a suffix here does not hand the proxy to a
+/// stranger who registers a similar name.
+fn is_netlify_preview(host: &str) -> bool {
+    host == NETLIFY_PREVIEW_SITE
+        || host
+            .strip_suffix(NETLIFY_PREVIEW_SITE)
+            .is_some_and(|alias| alias.ends_with("--") && alias.len() > 2)
+}
+
 pub fn is_allowed_origin(origin: &str) -> bool {
     let Ok(url) = Url::parse(origin) else {
         return false;
     };
     match url.host_str() {
         Some("nox.garden") => url.scheme() == "https",
+        Some(host) if is_netlify_preview(host) => url.scheme() == "https",
         Some("localhost") | Some("127.0.0.1") | Some("[::1]") => {
             url.scheme() == "http" || url.scheme() == "https"
         }

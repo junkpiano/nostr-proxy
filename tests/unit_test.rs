@@ -78,6 +78,44 @@ fn test_is_allowed_origin_production() {
 }
 
 #[test]
+fn test_is_allowed_origin_netlify_previews() {
+    // The nox web build gets a Netlify deploy preview per pull request, so
+    // link cards can be checked before a change is merged rather than after.
+    assert!(nostr_proxy::is_allowed_origin(
+        "https://nox-preview.netlify.app"
+    ));
+    assert!(nostr_proxy::is_allowed_origin(
+        "https://deploy-preview-53--nox-preview.netlify.app"
+    ));
+    assert!(nostr_proxy::is_allowed_origin(
+        "https://some-branch--nox-preview.netlify.app"
+    ));
+
+    // Netlify reads `<alias>--<site>` as an alias of that site, so the whole
+    // `--nox-preview.netlify.app` namespace belongs to this site and a name
+    // carrying `--` could never be routed to anyone else. Everything outside
+    // it is a stranger's site.
+    assert!(!nostr_proxy::is_allowed_origin(
+        "https://someone-else.netlify.app"
+    ));
+    assert!(!nostr_proxy::is_allowed_origin(
+        "https://nox-preview.netlify.app.evil.com"
+    ));
+    assert!(!nostr_proxy::is_allowed_origin(
+        "https://evil-nox-preview.netlify.app"
+    ));
+    assert!(!nostr_proxy::is_allowed_origin(
+        "https://x--nox-preview.netlify.app.evil.com"
+    ));
+
+    // Previews are served over TLS; there is no reason to accept anything
+    // else.
+    assert!(!nostr_proxy::is_allowed_origin(
+        "http://nox-preview.netlify.app"
+    ));
+}
+
+#[test]
 fn test_is_allowed_origin_localhost() {
     assert!(nostr_proxy::is_allowed_origin("http://localhost:3000"));
     assert!(nostr_proxy::is_allowed_origin("http://localhost:8787"));
